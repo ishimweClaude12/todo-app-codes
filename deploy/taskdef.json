@@ -1,0 +1,47 @@
+{
+  "family": "todo-app",
+  "requiresCompatibilities": ["FARGATE"],
+  "networkMode": "awsvpc",
+  "cpu": "256",
+  "memory": "512",
+  "runtimePlatform": {
+    "cpuArchitecture": "X86_64",
+    "operatingSystemFamily": "LINUX"
+  },
+  "taskRoleArn": "__TASK_ROLE_ARN__",
+  "executionRoleArn": "__EXECUTION_ROLE_ARN__",
+  "containerDefinitions": [
+    {
+      "name": "todo-app",
+      "image": "<IMAGE1_NAME>",
+      "essential": true,
+      "portMappings": [
+        { "containerPort": 3000, "protocol": "tcp" }
+      ],
+      "environment": [
+        { "name": "PORT", "value": "3000" },
+        { "name": "DB_HOST", "value": "__DB_PROXY_ENDPOINT__" },
+        { "name": "DB_PORT", "value": "5432" },
+        { "name": "DB_NAME", "value": "todoapp" },
+        { "name": "DB_USER", "value": "todoadmin" },
+        { "name": "DB_SSL", "value": "true" },
+        { "name": "REDIS_HOST", "value": "__REDIS_ENDPOINT__" },
+        { "name": "REDIS_PORT", "value": "6379" },
+        { "name": "REDIS_TLS", "value": "true" },
+        { "name": "CACHE_TTL_SECONDS", "value": "60" }
+      ],
+      "secrets": [
+        { "name": "DB_PASSWORD", "valueFrom": "__DB_SECRET_ARN__:password::" },
+        { "name": "REDIS_PASSWORD", "valueFrom": "__REDIS_AUTH_SECRET_ARN__" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "__LOG_GROUP__",
+          "awslogs-region": "__AWS_REGION__",
+          "awslogs-stream-prefix": "todo-app"
+        }
+      }
+    }
+  ]
+}

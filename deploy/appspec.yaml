@@ -1,0 +1,11 @@
+# CodeDeploy ECS blue/green appspec. CodePipeline replaces <TASK_DEFINITION>
+# with the ARN of the task definition it registers from taskdef.json.
+version: 0.0
+Resources:
+  - TargetService:
+      Type: AWS::ECS::Service
+      Properties:
+        TaskDefinition: <TASK_DEFINITION>
+        LoadBalancerInfo:
+          ContainerName: todo-app
+          ContainerPort: 3000

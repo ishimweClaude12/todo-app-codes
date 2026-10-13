@@ -1,0 +1,133 @@
+name: build-and-push
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  build:
+    # Proves the Dockerfile builds on every branch and PR. No AWS access.
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: todo-app:ci
+
+  deploy:
+    # The CI role trusts only refs/heads/main. Do not add `environment:` here:
+    # it changes the OIDC subject and the role assumption fails.
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      SSM_PREFIX: ${{ vars.SSM_PREFIX }}
+      ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+      REDIS_AUTH_SECRET_ARN: ${{ secrets.REDIS_AUTH_SECRET_ARN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.CI_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push SHA tag
+        id: image
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          TAG: ${{ github.sha }}
+        run: |
+          IMAGE="$REGISTRY/$ECR_REPOSITORY"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+          if aws ecr describe-images --repository-name "$ECR_REPOSITORY" \
+               --image-ids imageTag="$TAG" >/dev/null 2>&1; then
+            echo "$IMAGE:$TAG already exists; skipping push (tags are immutable)"
+            docker pull "$IMAGE:$TAG"
+          else
+            docker build -t "$IMAGE:$TAG" .
+            docker push "$IMAGE:$TAG"
+          fi
+
+      - name: Read infrastructure parameters
+        id: params
+        run: |
+          get() {
+            aws ssm get-parameter --name "$SSM_PREFIX/$1" \
+              --query Parameter.Value --output text 2>/dev/null || true
+          }
+          missing=0
+          for name in task-role-arn execution-role-arn log-group db-proxy-endpoint \
+                      db-secret-arn redis-endpoint artifact-bucket; do
+            value="$(get "$name")"
+            if [ -z "$value" ] || [ "$value" = "None" ]; then
+              echo "::notice::$SSM_PREFIX/$name not found"
+              missing=1
+            fi
+            key="$(echo "$name" | tr 'a-z-' 'A-Z_')"
+            echo "$key=$value" >> "$GITHUB_ENV"
+          done
+          if [ "$missing" = 1 ]; then
+            echo "::notice::Infrastructure stack not deployed yet; skipping bundle upload and latest tag. Re-run on main once it is up."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The bundle must be uploaded before `latest` is pushed: the pipeline
+      # reads it as soon as the ECR event starts it.
+      - name: Render and upload deploy bundle
+        if: steps.params.outputs.ready == 'true'
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          mkdir -p deploy/rendered
+          sed -e "s|__TASK_ROLE_ARN__|$TASK_ROLE_ARN|" \
+              -e "s|__EXECUTION_ROLE_ARN__|$EXECUTION_ROLE_ARN|" \
+              -e "s|__LOG_GROUP__|$LOG_GROUP|" \
+              -e "s|__DB_PROXY_ENDPOINT__|$DB_PROXY_ENDPOINT|" \
+              -e "s|__DB_SECRET_ARN__|$DB_SECRET_ARN|" \
+              -e "s|__REDIS_ENDPOINT__|$REDIS_ENDPOINT|" \
+              -e "s|__REDIS_AUTH_SECRET_ARN__|$REDIS_AUTH_SECRET_ARN|" \
+              -e "s|__AWS_REGION__|$AWS_REGION|" \
+              deploy/taskdef.json > deploy/rendered/taskdef.json
+          if grep -q '__[A-Z_]*__' deploy/rendered/taskdef.json; then
+            echo "::error::Unrendered placeholder in taskdef.json"; exit 1
+          fi
+          cp deploy/appspec.yaml deploy/rendered/appspec.yaml
+          (cd deploy/rendered && zip -q ../../config-source.zip taskdef.json appspec.yaml)
+          aws s3 cp config-source.zip "s3://$ARTIFACT_BUCKET/config-source.zip"
+
+      - name: Push latest tag (starts the pipeline)
+        if: steps.params.outputs.ready == 'true'
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+          TAG: ${{ github.sha }}
+        run: |
+          docker tag "$IMAGE:$TAG" "$IMAGE:latest"
+          docker push "$IMAGE:latest"

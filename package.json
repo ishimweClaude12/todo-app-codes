@@ -1,0 +1,29 @@
+{
+  "name": "todo-app-codes",
+  "version": "1.0.0",
+  "description": "Node.js to-do app backed by PostgreSQL (RDS Proxy) with Redis cache-aside, deployed to ECS Fargate via CodeDeploy blue/green",
+  "homepage": "https://github.com/ishimweClaude12/todo-app-codes#readme",
+  "bugs": {
+    "url": "https://github.com/ishimweClaude12/todo-app-codes/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ishimweClaude12/todo-app-codes.git"
+  },
+  "license": "ISC",
+  "author": "claude-ishimwe",
+  "type": "commonjs",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test \"test/**/*.test.js\""
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "pg": "^8.16.3",
+    "redis": "^5.8.2"
+  }
+}

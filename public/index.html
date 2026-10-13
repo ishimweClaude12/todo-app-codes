@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>To-Do</title>
+  <style>
+    :root {
+      --bg: #f6f7f9; --card: #fff; --text: #1d2330; --muted: #6b7385;
+      --border: #e2e5eb; --accent: #2f6fed; --danger: #d14343;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #12151b; --card: #1b2029; --text: #e6e9ef; --muted: #8b93a5;
+        --border: #2a3140; --accent: #6b9bff; --danger: #ff7070;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    main { max-width: 560px; margin: 48px auto; padding: 0 16px; }
+    h1 { font-size: 1.75rem; margin: 0 0 4px; }
+    .meta { color: var(--muted); font-size: .85rem; margin: 0 0 24px; }
+    form { display: flex; gap: 8px; margin-bottom: 16px; }
+    input[type=text] {
+      flex: 1; padding: 10px 12px; font: inherit; color: inherit;
+      background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    }
+    button {
+      font: inherit; padding: 8px 14px; border-radius: 8px; cursor: pointer;
+      border: 1px solid var(--border); background: var(--card); color: inherit;
+    }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    button.link { border: 0; background: none; padding: 4px 6px; color: var(--muted); }
+    button.link:hover { color: var(--text); }
+    button.danger:hover { color: var(--danger); }
+    ul { list-style: none; margin: 0; padding: 0; background: var(--card);
+         border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+    li { display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+         border-top: 1px solid var(--border); }
+    li:first-child { border-top: 0; }
+    li .title { flex: 1; word-break: break-word; }
+    li.done .title { text-decoration: line-through; color: var(--muted); }
+    li input[type=text] { padding: 6px 8px; }
+    input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); }
+    .empty { padding: 24px; text-align: center; color: var(--muted); }
+    .error { color: var(--danger); min-height: 1.5em; margin: 8px 0 0; font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>To-Do</h1>
+    <p class="meta">Last load: <span id="cache">—</span></p>
+
+    <form id="new-task">
+      <input id="title" type="text" placeholder="What needs doing?" maxlength="200" autocomplete="off" required>
+      <button class="primary" type="submit">Add</button>
+    </form>
+
+    <ul id="list"></ul>
+    <p class="error" id="error" role="alert"></p>
+  </main>
+
+  <script>
+    const list = document.getElementById('list');
+    const errorEl = document.getElementById('error');
+    const cacheEl = document.getElementById('cache');
+
+    async function api(method, path, body) {
+      const res = await fetch(path, {
+        method,
+        headers: body ? { 'Content-Type': 'application/json' } : {},
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `Request failed (${res.status})`);
+      }
+      return res;
+    }
+
+    function showError(err) { errorEl.textContent = err ? err.message : ''; }
+
+    async function load() {
+      try {
+        const res = await api('GET', '/api/tasks');
+        cacheEl.textContent = `cache ${res.headers.get('X-Cache') || 'n/a'}`;
+        render(await res.json());
+        showError();
+      } catch (err) { showError(err); }
+    }
+
+    function render(tasks) {
+      list.replaceChildren();
+      if (!tasks.length) {
+        const li = document.createElement('li');
+        li.className = 'empty';
+        li.textContent = 'Nothing to do yet.';
+        list.append(li);
+        return;
+      }
+      for (const task of tasks) list.append(row(task));
+    }
+
+    function row(task) {
+      const li = document.createElement('li');
+      li.classList.toggle('done', task.completed);
+
+      const check = document.createElement('input');
+      check.type = 'checkbox';
+      check.checked = task.completed;
+      check.setAttribute('aria-label', 'Completed');
+      check.onchange = () => mutate('PUT', task.id, { completed: check.checked });
+
+      const title = document.createElement('span');
+      title.className = 'title';
+      title.textContent = task.title;
+
+      const edit = button('Edit', 'link', () => startEdit(li, title, task));
+      const del = button('Delete', 'link danger', () => mutate('DELETE', task.id));
+
+      li.append(check, title, edit, del);
+      return li;
+    }
+
+    function button(label, className, onclick) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = className;
+      b.textContent = label;
+      b.onclick = onclick;
+      return b;
+    }
+
+    function startEdit(li, titleEl, task) {
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = task.title;
+      input.maxLength = 200;
+      input.className = 'title';
+      titleEl.replaceWith(input);
+      input.focus();
+      input.select();
+
+      let finished = false;
+      const finish = (save) => {
+        if (finished) return;
+        finished = true;
+        const value = input.value.trim();
+        if (save && value && value !== task.title) mutate('PUT', task.id, { title: value });
+        else input.replaceWith(titleEl);
+      };
+      input.onkeydown = (e) => {
+        if (e.key === 'Enter') finish(true);
+        if (e.key === 'Escape') finish(false);
+      };
+      input.onblur = () => finish(true);
+    }
+
+    async function mutate(method, id, body) {
+      try {
+        await api(method, `/api/tasks/${id}`, body);
+      } catch (err) { showError(err); }
+      await load();
+    }
+
+    document.getElementById('new-task').onsubmit = async (e) => {
+      e.preventDefault();
+      const input = document.getElementById('title');
+      const title = input.value.trim();
+      if (!title) return;
+      try {
+        await api('POST', '/api/tasks', { title });
+        input.value = '';
+      } catch (err) { showError(err); }
+      await load();
+    };
+
+    load();
+  </script>
+</body>
+</html>
