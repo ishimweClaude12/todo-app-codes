@@ -34,9 +34,11 @@ jobs:
           tags: todo-app:ci
 
   deploy:
-    # The CI role trusts only refs/heads/main. Do not add `environment:` here:
-    # it changes the OIDC subject and the role assumption fails.
+    # Secrets and variables come from the `dev` GitHub environment. Using an
+    # environment makes the OIDC subject repo:<owner>/<repo>:environment:dev,
+    # so the CI role's trust policy must allow that subject.
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    environment: dev
     runs-on: ubuntu-latest
     needs: build
     permissions:
