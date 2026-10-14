@@ -47,7 +47,6 @@ jobs:
     env:
       SSM_PREFIX: ${{ vars.SSM_PREFIX }}
       ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
-      REDIS_AUTH_SECRET_ARN: ${{ secrets.REDIS_AUTH_SECRET_ARN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -85,7 +84,7 @@ jobs:
           }
           missing=0
           for name in task-role-arn execution-role-arn log-group db-proxy-endpoint \
-                      db-secret-arn redis-endpoint artifact-bucket; do
+                      db-secret-arn redis-endpoint redis-auth-secret-arn artifact-bucket; do
             value="$(get "$name")"
             if [ -z "$value" ] || [ "$value" = "None" ]; then
               echo "::notice::$SSM_PREFIX/$name not found"
@@ -95,7 +94,7 @@ jobs:
             echo "$key=$value" >> "$GITHUB_ENV"
           done
           if [ "$missing" = 1 ]; then
-            echo "::notice::Infrastructure stack not deployed yet; skipping bundle upload and latest tag. Re-run on main once it is up."
+            echo "::notice::Infrastructure stack not deployed yet; skipping bundle upload. Re-run on main once it is up."
             echo "ready=false" >> "$GITHUB_OUTPUT"
           else
             echo "ready=true" >> "$GITHUB_OUTPUT"
@@ -125,8 +124,10 @@ jobs:
           (cd deploy/rendered && zip -q ../../config-source.zip taskdef.json appspec.yaml)
           aws s3 cp config-source.zip "s3://$ARTIFACT_BUCKET/config-source.zip"
 
+      # Always pushed: before the infrastructure stack exists there is no
+      # EventBridge rule, so this only seeds the image the ECS service is
+      # first created from. Once the stack exists, it starts the pipeline.
       - name: Push latest tag (starts the pipeline)
-        if: steps.params.outputs.ready == 'true'
         env:
           IMAGE: ${{ steps.image.outputs.image }}
           TAG: ${{ github.sha }}
