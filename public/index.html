@@ -47,6 +47,15 @@
     input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); }
     .empty { padding: 24px; text-align: center; color: var(--muted); }
     .error { color: var(--danger); min-height: 1.5em; margin: 8px 0 0; font-size: .9rem; }
+    dialog {
+      width: min(400px, calc(100% - 32px)); padding: 20px; color: var(--text);
+      background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    }
+    dialog::backdrop { background: rgb(0 0 0 / .45); }
+    dialog h2 { font-size: 1.1rem; margin: 0 0 8px; }
+    dialog p { margin: 0 0 20px; color: var(--muted); word-break: break-word; }
+    dialog .actions { display: flex; justify-content: flex-end; gap: 8px; }
+    button.destructive { background: var(--danger); border-color: var(--danger); color: #fff; }
   </style>
 </head>
 <body>
@@ -62,6 +71,17 @@
     <ul id="list"></ul>
     <p class="error" id="error" role="alert"></p>
   </main>
+
+  <dialog id="confirm-delete" aria-labelledby="confirm-delete-title">
+    <form method="dialog">
+      <h2 id="confirm-delete-title">Delete task?</h2>
+      <p>“<span id="confirm-delete-name"></span>” will be permanently removed.</p>
+      <div class="actions">
+        <button value="cancel" autofocus>Cancel</button>
+        <button value="confirm" class="destructive">Delete</button>
+      </div>
+    </form>
+  </dialog>
 
   <script>
     const list = document.getElementById('list');
@@ -119,7 +139,7 @@
       title.textContent = task.title;
 
       const edit = button('Edit', 'link', () => startEdit(li, title, task));
-      const del = button('Delete', 'link danger', () => mutate('DELETE', task.id));
+      const del = button('Delete', 'link danger', () => confirmDelete(task));
 
       li.append(check, title, edit, del);
       return li;
@@ -157,6 +177,17 @@
         if (e.key === 'Escape') finish(false);
       };
       input.onblur = () => finish(true);
+    }
+
+    const confirmDialog = document.getElementById('confirm-delete');
+
+    function confirmDelete(task) {
+      document.getElementById('confirm-delete-name').textContent = task.title;
+      confirmDialog.returnValue = '';
+      confirmDialog.onclose = () => {
+        if (confirmDialog.returnValue === 'confirm') mutate('DELETE', task.id);
+      };
+      confirmDialog.showModal();
     }
 
     async function mutate(method, id, body) {
